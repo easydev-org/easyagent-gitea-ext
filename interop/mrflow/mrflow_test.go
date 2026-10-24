@@ -273,8 +273,13 @@ func TestMRWorkflow(t *testing.T) {
 		"", nil, nil))
 
 	call := func(tool string, args map[string]any) (string, error) {
-		tr, err := a.CallTool(ctx, tenant, "s", extID, tool,
-			fmt.Sprintf("c-%d", time.Now().UnixNano()), args)
+		// With GRANTS: the writing tools are permission-gated, so a call without them is testing
+		// the refusal path rather than the behaviour this e2e exists for. The grants mirror what
+		// an operator would issue for this repository — the point of the test is the review
+		// workflow, and the gate is covered by the extension's own unit tests.
+		tr, err := a.CallToolWithGrants(ctx, tenant, "s", extID, tool,
+			fmt.Sprintf("c-%d", time.Now().UnixNano()), args,
+			grantsForAll())
 		if err != nil {
 			return "", err
 		}
@@ -356,6 +361,30 @@ func TestMRWorkflow(t *testing.T) {
 }
 
 // ---- helpers ---------------------------------------------------------------
+
+// grantsForAll issues every permission this extension declares, scoped to the repositories the
+// e2e uses.
+//
+// The writing tools are permission-gated since v0.9.x, so a call with no grants exercises the
+// REFUSAL path. That path has its own unit tests; this e2e exists to prove the review workflow
+// end to end, which needs the authorisations an operator would issue.
+func grantsForAll() []*easybus.Grant {
+	repos := []string{"agentdev/mrflow", "agentdev/mrflow-empty", "*"}
+	// Only the keys this extension actually declares for the tools the e2e drives. Issuing
+	// permissions nothing requires would make the test pass against a manifest that no longer
+	// gates what it claims to.
+	keys := []string{"mr.merge", "mr.close"}
+	out := make([]*easybus.Grant, 0, len(keys)*len(repos))
+	for _, k := range keys {
+		for _, r := range repos {
+			out = append(out, &easybus.Grant{
+				Key:    k,
+				Params: easybus.Struct(map[string]any{"repo": r}),
+			})
+		}
+	}
+	return out
+}
 
 func clip(s string) string {
 	s = strings.ReplaceAll(s, "\n", " | ")
